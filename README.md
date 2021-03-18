@@ -26,7 +26,29 @@ Build Instructions:
 1. Connect PIN 11 - 13 to extra buttons at the top.
 
 Operating Instructions: 
-* PIN_RECORD (11) is the hold button to record songs.
+* PIN_RECORD (11) is the toggle button to record songs.
 * Press both PIN_ADD (13) and PIN_SUB (12) at the same time to play songs. (default plays 8 notes in order)
 * EEPROM saving is automatic when you let go record.
 * Hold both PIN_SUB (12) and PIN_RECORD (11) at the same time for three seconds to clear the EEPROM.
+
+Serial Commands: 
+ * Basic Commands: 
+   * play     : Plays current song in memory
+   * playrec  : Alias for play
+   * stop     : Stops playing any song
+   * stoprec  : Alias for stop
+* Toggle Commands: 
+   * printoff : Stops printing every note played to serial
+   * printon  : Begins printing every note played to serial
+   * romoff   : Stops automatic saving to rom
+   * romon    : Begins automatic saving to rom
+* EEPROM Commands: 
+   * saverom  : Saves song in memory to the EEPROM
+   * printrom : Prints the contents of the EEPROM to serial
+   * clear    : Clears the contents of the EEPROM
+   * clearrom : Alias for clear
+* Recording Commands: 
+   * beginrec : Begins recording to memory
+   * rec      : Alias for beginrec
+   * record   : Alias for beginrec
+   * endrec   : Stops recording to memory
