@@ -18,9 +18,11 @@ byte song[512] = {0, 1, 2, 3, 4, 5, 6, 7, -100};
 byte pins[8] = {3, 4, 5, 6, 7, 8, 9, 10};
 byte clearIndex = 0;
 
-bool songMode = true;
+bool songMode = false;
 bool recording = false;
 bool precording = false;
+bool printSong = false;
+bool saveEEPROM = true;
 
 void setup() {
 
@@ -32,6 +34,8 @@ void setup() {
   for (int i = 0; i < 8; i++) {
     pinMode(pins[i], INPUT);
     digitalWrite(pins[i], HIGH); // turn on pullup resistors
+    Serial.print(F("Initializing: "));
+    Serial.println(i);
   }
 
   digitalWrite(PIN_RECORD, HIGH);
@@ -46,13 +50,29 @@ void setup() {
   //}
 
   Serial.println(F("Loading song from EEPROM..."));
-  EEPROM.get(0, song);
-  for (int i = 0; i < 512; i++) {
-    if (song[i] == 255) {
-      songIndex = i;
-      break;
+  if (EEPROM[0] == 255) {
+    Serial.println(F("Detected empty or corrupt EEPROM. Loading default instead. "));
+
+    songLength = 8;
+    song[0] = 0;
+    song[1] = 1;
+    song[2] = 2;
+    song[3] = 3;
+    song[4] = 4;
+    song[5] = 5;
+    song[6] = 6;
+    song[7] = 7;
+
+    songMode = true;
+  } else {
+    EEPROM.get(0, song);
+    for (int i = 0; i < 512; i++) {
+      if (song[i] == 255) {
+        songLength = i;
+        break;
+      }
+      Serial.println(song[i]);      
     }
-    Serial.println(song[i]);      
   }
   Serial.println(F("Loading complete"));
   Serial.println(F("Press any button to play"));
@@ -63,15 +83,78 @@ void loop() {
   if (songMode && song[songIndex] == -100) {
     delay(100);
   }
-  if (digitalRead(PIN_SUB) == LOW && digitalRead(PIN_ADD) == LOW) {
+
+  // Serial Reading 
+  int data = 0;
+  String cmd = "        ";
+  if (Serial.available()) {
+    data = Serial.read();
+    if (data > 0 && data <= 90)
+    {
+      Serial.print(F("Received Command: "));
+      Serial.println(data);
+    }
+    int i = 0;
+    while(data > 90 && i < 8) {
+      cmd[i] = data;
+      data = Serial.read();
+      i++;
+    }
+    if (cmd != "        ") {
+      Serial.print(F("Received Command: "));
+      Serial.println(cmd);
+    }
+  }
+
+  //  Beginning playback
+  if (digitalRead(PIN_SUB) == LOW && digitalRead(PIN_ADD) == LOW || cmd == "play    " || cmd == "playrec ") {
     songMode = true;
     interval = 0.1;
     songIndex = 0;
+    Serial.println(F("Beginning song playback"));
   }
 
-  
+  // Stopping playback
+  if (cmd == "stop   ") {
+    songMode = false;
+    songIndex = 0;
+    Serial.println(F("Stopping song playback"));
+  }
+
+  if (cmd == "printoff") {
+    printSong = false;
+    Serial.println(F("Turning off note printing"));
+  }
+
+  if (cmd == "printon ") {
+    printSong = true;
+    Serial.println(F("Turning on note printing"));
+  }
+
+  if (cmd == "romoff  ") {
+    printSong = false;
+    Serial.println(F("Turning off note printing"));
+  }
+
+  if (cmd == "romon   ") {
+    printSong = true;
+    Serial.println(F("Turning on note printing"));
+  }
+
+  if (cmd == "printrom") {
+    Serial.println(F("Printing EEPROM contents..."));
+    for (int i = 0; i < EEPROM.length() && EEPROM[i] < 255; i++) {
+      Serial.println(EEPROM[i]);
+    }
+    Serial.println(F("Print complete. "));
+    if (EEPROM[0] == 255) {
+      Serial.println(F("EEPROM was Empty. "));
+    }
+  }
+
+  //All forms of song playback
   for (int i = 0; i < 8; i++) {
-    if (digitalRead(pins[i]) == LOW || (songMode && i == song[songIndex])) {
+    if (digitalRead(pins[i]) == LOW || (songMode && i == song[songIndex]) || (data - 48) == i) {
       float t = 0;
       float a = frequencyMultiplier / (frequencies[i + transpose] + frequencyOffset);
       float d1 = 1000000 * a * dutyCycle;
@@ -83,7 +166,9 @@ void loop() {
         digitalWrite(PIN, false);
         delayMicroseconds (d2);
       }
+      if (printSong) {
         Serial.println(i);
+      }
       if (recording) {
         song[songLength] = i;
         songLength++;
@@ -91,7 +176,7 @@ void loop() {
       played = false;
     }
   }
-
+  
   if (played && recording) {
     song[songLength] = -100;
     songLength++;
@@ -100,46 +185,87 @@ void loop() {
     delay(100);
   }
 
-  if (digitalRead(PIN_RECORD) == LOW && digitalRead(PIN_SUB) == LOW) {
+  // EEPROM Clearing
+  if (digitalRead(PIN_RECORD) == LOW && digitalRead(PIN_SUB) == LOW|| cmd == "clear   " || cmd == "clearrom") {
     delay(100);
     clearIndex++;
     if (clearIndex == 3) {
       Serial.println(F("Holding down both PIN_RECORD and PIN_SUB at the same time, Hold for 3 seconds to clear EEPROM"));
     }
-    if (clearIndex == 31) {
+    if (clearIndex == 31 || cmd == "clear   " || cmd == "clearrom") {
+      ClearROM();
+    }
+  } else {
+    clearIndex = 0;
+  }
+
+  // Song Recording
+  if (digitalRead(PIN_RECORD) == LOW) {
+    if (!precording) {
+      precording = true;
+      recording = !recording;
+      if (recording) {
+        songLength = 0;
+        Serial.println(F("Beginning song record..."));
+      } else {
+        SaveROM();
+      }
+    }
+  } else {
+    precording = false;
+  }
+  // Record Commands
+  if (cmd == "beginrec") {
+    if (recording) {
+      Serial.println(F("Restarting recording via command"));
+    } else {
+      Serial.println(F("Beginning recording via command"));
+    }
+    recording = true;
+    songLength = 0;
+  }
+  if (cmd == "endrec  ") { 
+    Serial.println(F("Ending record via command"));
+    if (saveEEPROM) {
+      SaveROM();
+    } else {
+      Serial.println(F("Saving to EEPROM was disabled. Use saverom to save. Use romon to enable automatic saving"));
+    }
+
+    recording = false;
+    songIndex = 0;
+  }
+
+  if (cmd == "saverom ") {
+    SaveROM();
+  }
+
+  // Song Mode Checks
+  if (songMode) {
+    SongChecks();
+  }
+}
+
+void SaveROM() {
+    Serial.println(F("Saving song to EEPROM..."));
+    EEPROM.put(0, song);
+    Serial.println(F("Save Sucessful."));
+}
+
+void ClearROM() {  
       Serial.println(F("Clearing EEPROM..."));
 
       for (int i = 0 ; i < EEPROM.length() ; i++) {
         EEPROM.write(i, 255);
       }
       clearIndex = 0;
-
       songMode = false;
       
       Serial.println(F("EEPROM sucessfully cleared"));
-    }
-  } else {
-    clearIndex = 0;
-  }
+}
 
-  if (digitalRead(PIN_RECORD) == LOW) {
-    if (!precording) {
-      Serial.println(F("Beginning song record..."));
-      precording = true;
-      recording = !recording;
-      if (recording) {
-        songLength = 0;
-      } else {
-        Serial.println(F("Saving song to EEPROM..."));
-        EEPROM.put(0, song);
-        Serial.println(F("Save Sucessful."));
-      }
-    }
-  } else {
-    precording = false;
-  }
-
-  if (songMode) {
+void SongChecks() {
+  
     if (interval == 0.05) {
       delay(50);
     }
@@ -152,5 +278,4 @@ void loop() {
     if (song[songIndex] == 255) {
       songMode = false;
     }
-  }
 }
